@@ -78,9 +78,11 @@ EOF
 #sudo apt update
 sudo apt install -y acpica-tools binwalk
 
-mkdir sleep_fix -p
-rm -rf sleep_fix/*
-cd sleep_fix
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+mkdir /tmp/sleep_fix -p
+rm -rf /tmp/sleep_fix/*
+cd /tmp/sleep_fix
 
 # get original dsdt
 sudo cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
@@ -145,3 +147,19 @@ sudo update-grub
 # work around for the USB system which doesnt come back after sleep
 echo "$SUSPEND_SCRIPT" | sudo tee /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
 sudo chmod +x /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
+
+# Copy myself to /etc/kernel/postinst.d/ so runs after a kernel update
+sudo cp $SCRIPT_DIR/$(basename $0) /etc/kernel/postinst.d/yy-s3-sleep-fix
+sudo chmod +x /etc/kernel/postinst.d/yy-s3-sleep-fix
+
+# done
+echo " "
+echo "All done"
+echo "To remove everything:"
+echo "--------------"
+echo "rm /etc/kernel/postinst.d/yy-s3-sleep-fix"
+echo "rm /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh"
+echo "mv $INITRD.bck.s3patch $INITRD"
+echo "apt remove acpica-tools binwalk"
+echo "Manualy remove 'mem_sleep_default=deep' and 'pcie_aspm=force' from /etc/default/grub"
+echo "--------------"

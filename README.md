@@ -1,7 +1,7 @@
 # S3_Sleep_Fix
 
 Hardware: Pavilion 15-eh1000 (Ryzen 5000) 
-Software: Ubuntu 21.10 (But should work on all recent Debian / Ubuntu versions
+Software: Ubuntu 21.10 (But should work on all recent Debian / Ubuntu versions)
 
 Fixes the issue that the HP Pavilion 15-eh1000 (Ryzen 5000) doesnt go into S3 sleep under linux.
 
@@ -20,4 +20,6 @@ Patch, basically add this block to the dsdt
 
 Somehow all USB controllers are not responding anymore after wakeup from S3, so a small script in /lib/systemd/system-sleep/ fixes this by unbinding and binding the USB devices
 
-Also adds mem_sleep_default=deep and pcie_aspm=force to grub (pcie_aspm=force is not needed for this fis, but disabled without a good reason)
+Also adds mem_sleep_default=deep and pcie_aspm=force to grub (pcie_aspm=force is not needed for the S3 fix, but disabled without a good reason)
+
+Update script is added to /etc/kernel/postinst.d/ so that it updates initrd again after a kernel update
