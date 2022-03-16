@@ -73,6 +73,17 @@ EOF
 )
 
 ####### Fix sleep bug HP pavillion linux HP Pavilion 15.6 inch Laptop PC 15-eh1000 (2H5A7AV) ########
+RED="\e[1;31m"
+GREEN="\e[1;32m"
+NC="\e[0m" 
+
+redEcho () {
+  printf "\n${RED}${1}${NC}\n\n"
+}
+
+greenEcho () {
+  printf "\n${GREEN}${1}${NC}\n\n"
+}
 
 # install iasl tools (ubuntu/debian) and binwalk, to extract the initrd
 #sudo apt update
@@ -89,9 +100,12 @@ sudo cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
 # decompile it
 iasl -d dsdt.aml
 ## patch it
-echo "$PATCH" | patch --ignore-whitespace -s -N
-# compile it again
-iasl dsdt.dsl
+echo "$PATCH" | patch --ignore-whitespace  -N
+
+greenEcho "check if the patch is applied successfully or else exit the script with CRTL-C"
+read -rsn1 -p"Press any key to continue";echo
+# compile it again -ve to make it less verbose
+iasl -ve  dsdt.dsl
 
 # build structure for kernel
 mkdir -p kernel/firmware/acpi
@@ -100,7 +114,7 @@ find kernel | cpio -H newc --create > dsdt_patch
 
 # get current initrd image
 INITRD="/boot/initrd.img-$(uname -r)"
-echo "Found running initrd.img $INITRD"
+greenEcho "Found running initrd.img $INITRD"
 
 # grub setting file
 GRUB="/etc/default/grub"
@@ -113,35 +127,39 @@ GRUB="/etc/default/grub"
 ## END
 
 # check if file is not patched yet
-echo "Checking if initrd is already patched, this can take a few seconds"
+greenEcho "Checking if initrd is already patched, this can take a few seconds"
 if binwalk $INITRD|grep "kernel/firmware/acpi/dsdt.aml"; then
-    echo "File is already patched, ignore initrd update"
+    redEcho "File is already patched, ignore initrd update"
 else
-    echo "Patching initrd"
+    greenEcho "Patching initrd"
     # make a backup if the backup does not exist yet
     sudo cp -n $INITRD $INITRD.bck.s3patch
-    sudo cat dsdt_patch $INITRD.bck.s3patch > $INITRD
-    echo "yeah initrd is patched"
+    sudo cat dsdt_patch $INITRD.bck.s3patch > $(basename $INITRD)
+    sudo cp $(basename $INITRD) $INITRD
+    greenEcho "yeah initrd is patched"
 fi
 
 # adding mem_sleep_default=deep to grub and pcie_aspm=force since its disabled without a reason
 GRUB_CMDLINE=""
 if ! cat $GRUB|grep -E "(GRUB_CMDLINE_LINUX_DEFAULT.+mem_sleep_default=deep)"; then
-    echo "Adding mem_sleep_default=deep to grub cmdline"
+    greenEcho "Adding mem_sleep_default=deep to grub cmdline"
     GRUB_CMDLINE=" mem_sleep_default=deep"
 fi
 
 if ! cat $GRUB|grep -E "(GRUB_CMDLINE_LINUX_DEFAULT.+pcie_aspm=force)"; then
-    echo "Adding pcie_aspm=force to grub cmdline"
+    greenEcho "Adding pcie_aspm=force to grub cmdline"
     GRUB_CMDLINE=$GRUB_CMDLINE" pcie_aspm=force"
 fi
 
-echo "appending $GRUB_CMDLINE to GRUB_CMDLINE_LINUX_DEFAULT"
+greenEcho "appending $GRUB_CMDLINE to GRUB_CMDLINE_LINUX_DEFAULT"
 ORIG_GRUB_CMDLINE=$(grep -oP 'GRUB_CMDLINE_LINUX_DEFAULT="[^"]+' $GRUB)
-echo $ORIG_GRUB_CMDLINE
-sed -i "s/$ORIG_GRUB_CMDLINE/$ORIG_GRUB_CMDLINE$GRUB_CMDLINE/" $GRUB
-echo "grub settings patched"
-cat $GRUB 
+greenEcho $ORIG_GRUB_CMDLINE
+sudo sed -i "s/$ORIG_GRUB_CMDLINE/$ORIG_GRUB_CMDLINE$GRUB_CMDLINE/" $GRUB
+greenEcho "grub settings patched from"
+redEcho $ORIG_GRUB_CMDLINE
+greenEcho "to"
+greenEcho $ORIG_GRUB_CMDLINE$GRUB_CMDLINE
+
 sudo update-grub
 
 # work around for the USB system which doesnt come back after sleep
@@ -153,13 +171,13 @@ sudo cp $SCRIPT_DIR/$(basename $0) /etc/kernel/postinst.d/yy-s3-sleep-fix
 sudo chmod +x /etc/kernel/postinst.d/yy-s3-sleep-fix
 
 # done
-echo " "
-echo "All done"
-echo "To remove everything:"
-echo "--------------"
-echo "rm /etc/kernel/postinst.d/yy-s3-sleep-fix"
-echo "rm /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh"
-echo "mv $INITRD.bck.s3patch $INITRD"
-echo "apt remove acpica-tools binwalk"
-echo "Manualy remove 'mem_sleep_default=deep' and 'pcie_aspm=force' from /etc/default/grub"
-echo "--------------"
+greenEcho " "
+greenEcho "All done"
+greenEcho "To remove everything:"
+greenEcho "--------------"
+greenEcho "rm /etc/kernel/postinst.d/yy-s3-sleep-fix"
+greenEcho "rm /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh"
+greenEcho "mv $INITRD.bck.s3patch $INITRD"
+greenEcho "apt remove acpica-tools binwalk"
+greenEcho "Manualy remove 'mem_sleep_default=deep' and 'pcie_aspm=force' from /etc/default/grub"
+greenEcho "--------------"
