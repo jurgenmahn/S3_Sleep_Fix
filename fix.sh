@@ -15,19 +15,19 @@ PATCH=$(cat <<EOF
      External (_PR_.P000, UnknownObj)
      External (_PR_.P000.PPCV, IntObj)
 @@ -3089,6 +3089,13 @@
-         Zero, 
+         Zero,
          Zero
      })
 +    Name (_S3, Package (0x04)  // _S3_: S3 System State
 +    {
-+        0x03, 
-+        0x03, 
-+        Zero, 
++        0x03,
++        0x03,
++        Zero,
 +        Zero
 +    })
      Name (_S4, Package (0x04)  // _S4_: S4 System State
      {
-         0x04, 
+         0x04,
 @@ -10462,24 +10469,6 @@
                      }
                      Case (0x03)
@@ -63,11 +63,11 @@ if [ "${1}" == "pre" ]; then
     rm /tmp/usb_devices -f;find  /sys/bus/pci/drivers/xhci_hcd -name '0000*' | xargs -i bash -c 'echo $(basename {}) >> /tmp/usb_devices'
     while read p; do
         echo "$p" > /sys/bus/pci/drivers/xhci_hcd/unbind
-    done </tmp/usb_devices    
+    done </tmp/usb_devices
 elif [ "${1}" == "post" ]; then
     while read p; do
         echo "$p" > /sys/bus/pci/drivers/xhci_hcd/bind
-    done </tmp/usb_devices  
+    done </tmp/usb_devices
 fi
 EOF
 )
@@ -75,19 +75,29 @@ EOF
 ####### Fix sleep bug HP pavillion linux HP Pavilion 15.6 inch Laptop PC 15-eh1000 (2H5A7AV) ########
 RED="\e[1;31m"
 GREEN="\e[1;32m"
-NC="\e[0m" 
+NC="\e[0m"
 
 redEcho () {
   printf "\n${RED}${1}${NC}\n\n"
+  logger "S3 Patch script " ${1}
 }
 
 greenEcho () {
   printf "\n${GREEN}${1}${NC}\n\n"
+  logger "S3 Patch script " ${1}
 }
 
+# check if we are root
+if [[ $EUID -ne 0 ]]; then
+   redEcho "The S3 Patch script can only be started as root user, exiting now"
+   exit 1
+fi
+
+greenEcho "S3 Patch script started"
+
 # install iasl tools (ubuntu/debian) and binwalk, to extract the initrd
-#sudo apt update
-sudo apt install -y acpica-tools binwalk
+#apt update
+apt install -y acpica-tools binwalk
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
@@ -96,20 +106,22 @@ rm -rf /tmp/sleep_fix/*
 cd /tmp/sleep_fix
 
 # get original dsdt
-sudo cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
+cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
 # decompile it
 iasl -d dsdt.aml
 ## patch it
 echo "$PATCH" | patch --ignore-whitespace  -N
 
-greenEcho "check if the patch is applied successfully or else exit the script with CRTL-C"
-read -rsn1 -p"Press any key to continue";echo
+## That doesnt work if the script runs unattented after a kernel update :)
+# greenEcho "check if the patch is applied successfully or else exit the script with CRTL-C"
+# read -rsn1 -p"Press any key to continue";echo
+
 # compile it again -ve to make it less verbose
 iasl -ve  dsdt.dsl
 
 # build structure for kernel
 mkdir -p kernel/firmware/acpi
-sudo cp dsdt.aml kernel/firmware/acpi/
+cp dsdt.aml kernel/firmware/acpi/
 find kernel | cpio -H newc --create > dsdt_patch
 
 # get current initrd image
@@ -133,9 +145,9 @@ if binwalk $INITRD|grep "kernel/firmware/acpi/dsdt.aml"; then
 else
     greenEcho "Patching initrd"
     # make a backup if the backup does not exist yet
-    sudo cp -n $INITRD $INITRD.bck.s3patch
-    sudo cat dsdt_patch $INITRD.bck.s3patch > $(basename $INITRD)
-    sudo cp $(basename $INITRD) $INITRD
+    cp -n $INITRD $INITRD.bck.s3patch
+    cat dsdt_patch $INITRD.bck.s3patch > $(basename $INITRD)
+    cp $(basename $INITRD) $INITRD
     greenEcho "yeah initrd is patched"
 fi
 
@@ -154,21 +166,21 @@ fi
 greenEcho "appending $GRUB_CMDLINE to GRUB_CMDLINE_LINUX_DEFAULT"
 ORIG_GRUB_CMDLINE=$(grep -oP 'GRUB_CMDLINE_LINUX_DEFAULT="[^"]+' $GRUB)
 greenEcho $ORIG_GRUB_CMDLINE
-sudo sed -i "s/$ORIG_GRUB_CMDLINE/$ORIG_GRUB_CMDLINE$GRUB_CMDLINE/" $GRUB
+sed -i "s/$ORIG_GRUB_CMDLINE/$ORIG_GRUB_CMDLINE$GRUB_CMDLINE/" $GRUB
 greenEcho "grub settings patched from"
 redEcho $ORIG_GRUB_CMDLINE
 greenEcho "to"
 greenEcho $ORIG_GRUB_CMDLINE$GRUB_CMDLINE
 
-sudo update-grub
+update-grub
 
 # work around for the USB system which doesnt come back after sleep
-echo "$SUSPEND_SCRIPT" | sudo tee /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
-sudo chmod +x /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
+echo "$SUSPEND_SCRIPT" | tee /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
+chmod +x /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
 
 # Copy myself to /etc/kernel/postinst.d/ so runs after a kernel update
-sudo cp $SCRIPT_DIR/$(basename $0) /etc/kernel/postinst.d/yy-s3-sleep-fix
-sudo chmod +x /etc/kernel/postinst.d/yy-s3-sleep-fix
+cp $SCRIPT_DIR/$(basename $0) /etc/kernel/postinst.d/yy-s3-sleep-fix
+chmod +x /etc/kernel/postinst.d/yy-s3-sleep-fix
 
 # done
 greenEcho " "
