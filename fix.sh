@@ -96,8 +96,18 @@ fi
 greenEcho "S3 Patch script started"
 
 # install iasl tools (ubuntu/debian) and binwalk, to extract the initrd
-#apt update
-apt install -y acpica-tools binwalk
+# apt update
+# apt install -y acpica-tools binwalk
+
+if ! which iasl > /dev/null; then
+   redEcho "iasl is not installed on Ubuntu / debian `apt install acpica-tools`";
+   exit 1;
+fi
+
+if ! which binwalk > /dev/null; then
+   redEcho "binwalk is not installed on Ubuntu / debian `apt install binwalk`";
+   exit 1;
+fi
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
