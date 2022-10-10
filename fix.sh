@@ -95,6 +95,14 @@ fi
 
 greenEcho "S3 Patch script started"
 
+greenEcho "Lets see if we need to run"
+MEMSLEEP=$(cat /sys/power/mem_sleep|grep '[deep]')
+
+if $MEMSLEEP; then
+    greenEcho "Deep sleep already active, exiting script"
+    exit 0;
+fi
+
 # install iasl tools (ubuntu/debian) and binwalk, to extract the initrd
 # apt update
 # apt install -y acpica-tools binwalk
