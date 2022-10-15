@@ -1,5 +1,8 @@
 #!/bin/bash
 
+##
+## Cron startup script incl notify
+
 ####### dsdt patch data ########
 
 PATCH=$(cat <<EOF
@@ -96,9 +99,16 @@ fi
 greenEcho "S3 Patch script started"
 
 greenEcho "Lets see if we need to run"
-MEMSLEEP=$(cat /sys/power/mem_sleep|grep '[deep]')
+MEMSLEEP=$(cat /sys/power/mem_sleep)
 
-if $MEMSLEEP; then
+greenEcho "Current sleep state $MEMSLEEP"
+
+S2IDLE=$(echo $MEMSLEEP|grep '[s2idle]')
+DEEP=$(echo $MEMSLEEP|grep '[deep]')
+
+
+if [[ ! -z "$DEEP
+" ]]; then
     greenEcho "Deep sleep already active, exiting script"
     exit 0;
 fi
@@ -211,3 +221,6 @@ greenEcho "mv $INITRD.bck.s3patch $INITRD"
 greenEcho "apt remove acpica-tools binwalk"
 greenEcho "Manualy remove 'mem_sleep_default=deep' and 'pcie_aspm=force' from /etc/default/grub"
 greenEcho "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+# 5 triggers the notify script
+exit 5;
