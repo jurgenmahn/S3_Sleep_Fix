@@ -2,6 +2,10 @@
 
 ##
 ## Cron startup script incl notify
+# add to sudoers
+# jurgen ALL=(ALL:ALL) NOPASSWD: /home/jurgen/sleep_fix/fix.sh
+# crontab
+# */5 * * * * sudo /home/jurgen/sleep_fix/fix.sh ; [[ $? -eq 5 ]] && /usr/bin/notify-send "Sleep fix script updated, need a reboot"
 
 ####### dsdt patch data ########
 
