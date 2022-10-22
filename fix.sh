@@ -107,12 +107,13 @@ MEMSLEEP=$(cat /sys/power/mem_sleep)
 
 greenEcho "Current sleep state $MEMSLEEP"
 
-S2IDLE=$(echo $MEMSLEEP|grep '[s2idle]')
-DEEP=$(echo $MEMSLEEP|grep '[deep]')
+S2IDLE=$(cat /sys/power/mem_sleep|grep '\[s2idle\]')
+DEEP=$(cat /sys/power/mem_sleep|grep '\[deep\]')
 
+greenEcho "S2IDLE State $S2IDLE"
+greenEcho "DEEP State $DEEP"
 
-if [[ ! -z "$DEEP
-" ]]; then
+if [[ ! -z "$DEEP" ]]; then
     greenEcho "Deep sleep already active, exiting script"
     exit 0;
 fi
