@@ -95,7 +95,7 @@ greenEcho "DEEP State $DEEP"
 
 if [[ ! -z "$DEEP" ]]; then
     greenEcho "Deep sleep already active, exiting script"
-   # exit 0;
+    exit 0;
 fi
 
 # install iasl tools (ubuntu/debian) and binwalk, to extract the initrd

@@ -1,0 +1,25 @@
+--- orig_dsdt.dsl	2025-01-31 01:04:57.678241801 +0100
++++ dsdt.dsl	2025-01-31 01:06:00.852378024 +0100
+@@ -18,7 +18,7 @@
+  *     Compiler ID      "ACPI"
+  *     Compiler Version 0x20190509 (538510601)
+  */
+-DefinitionBlock ("", "DSDT", 2, "HPQOEM", "88D0    ", 0x01072009)
++DefinitionBlock ("", "DSDT", 2, "HPQOEM", "88D0    ", 0x01072010)
+ {
+     External (_SB_.ALIB, MethodObj)    // 2 Arguments
+     External (_SB_.APTS, MethodObj)    // 1 Arguments
+@@ -3176,6 +3176,13 @@
+         Zero, 
+         Zero
+     })
++    Name (_S3, Package (0x04)  // _S3_: S3 System State
++    {
++        0x03,
++        0x03,
++        Zero,
++        Zero
++    })    
+     Name (_S4, Package (0x04)  // _S4_: S4 System State
+     {
+         0x04, 

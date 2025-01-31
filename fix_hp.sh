@@ -7,22 +7,24 @@
 # crontab
 # */5 * * * * sudo /home/jurgen/sleep_fix/fix.sh ; [[ $? -eq 5 ]] && /usr/bin/notify-send "Sleep fix script updated, need a reboot"
 
+## diff -Naru orig_dsdt.dsl dsdt.dsl 
+
 ####### dsdt patch data ########
 
 PATCH=$(cat <<EOF
---- dsdt_original.dsl	2022-03-05 10:21:26.206900527 +0100
-+++ dsdt.dsl	2022-03-05 10:07:51.804059570 +0100
+--- orig_dsdt.dsl	2025-01-31 01:04:57.678241801 +0100
++++ dsdt.dsl	2025-01-31 01:06:00.852378024 +0100
 @@ -18,7 +18,7 @@
-  *     Compiler ID      "INTL"
-  *     Compiler Version 0x20200925 (538970405)
+  *     Compiler ID      "ACPI"
+  *     Compiler Version 0x20190509 (538510601)
   */
 -DefinitionBlock ("", "DSDT", 2, "HPQOEM", "88D0    ", 0x01072009)
 +DefinitionBlock ("", "DSDT", 2, "HPQOEM", "88D0    ", 0x01072010)
  {
-     External (_PR_.P000, UnknownObj)
-     External (_PR_.P000.PPCV, IntObj)
-@@ -3089,6 +3089,13 @@
-         Zero,
+     External (_SB_.ALIB, MethodObj)    // 2 Arguments
+     External (_SB_.APTS, MethodObj)    // 1 Arguments
+@@ -3176,6 +3176,13 @@
+         Zero, 
          Zero
      })
 +    Name (_S3, Package (0x04)  // _S3_: S3 System State
@@ -31,35 +33,10 @@ PATCH=$(cat <<EOF
 +        0x03,
 +        Zero,
 +        Zero
-+    })
++    })    
      Name (_S4, Package (0x04)  // _S4_: S4 System State
      {
-         0x04,
-@@ -10462,24 +10469,6 @@
-                     }
-                     Case (0x03)
-                     {
--                        DerefOf (Local0 [0x02]) [One] = Zero
--                        DerefOf (Local0 [0x02]) [0x02] = Zero
--                        DerefOf (Local0 [0x02]) [0x03] = Zero
--                        DerefOf (Local0 [0x02]) [0x04] = Zero
--                        DerefOf (Local0 [0x02]) [0x05] = Zero
--                        DerefOf (Local0 [0x02]) [0x06] = Zero
--                        DerefOf (Local0 [0x02]) [0x07] = Zero
--                        DerefOf (Local0 [0x02]) [0x08] = Zero
--                        DerefOf (Local0 [0x02]) [0x09] = Zero
--                        DerefOf (Local0 [0x02]) [0x0A] = Zero
--                        DerefOf (Local0 [0x02]) [0x0B] = Zero
--                        DerefOf (Local0 [0x02]) [0x0C] = Zero
--                        DerefOf (Local0 [0x02]) [0x0D] = Zero
--                        DerefOf (Local0 [0x02]) [0x0E] = Zero
--                        DerefOf (Local0 [0x02]) [0x0F] = Zero
--                    }
--                    Case (0x03)
--                    {
-                         DerefOf (Local0 [0x02]) [One] = Zero
-                         DerefOf (Local0 [0x02]) [0x02] = Zero
-                         DerefOf (Local0 [0x02]) [0x03] = Zero
+         0x04, 
 EOF
 )
 
