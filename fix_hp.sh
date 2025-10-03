@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# yy-s3-sleep-fix - robust HP Pavilion S3 sleep fixer (initramfs DSDT patch + GRUB flags)
+# yy-s3-sleep-fix - robust HP Pavilion S3 sleep fixer (initramfs DSDT patch + GRUB flags + NVMe ASPM fix)
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -8,16 +8,18 @@ IFS=$'\n\t'
 REQUIRED_PKGS=(acpica-tools binwalk)
 GRUB_FILE="/etc/default/grub"
 GRUB_KEY="GRUB_CMDLINE_LINUX_DEFAULT"
-REQUIRED_KERNEL_FLAGS=("mem_sleep_default=deep" "pcie_aspm=performance" "nvme_core.default_ps_max_latency_us=0")
+REQUIRED_KERNEL_FLAGS=("mem_sleep_default=deep")
 POSTINST_TARGET="/etc/kernel/postinst.d/yy-s3-sleep-fix"
 SYSTEMD_SLEEP_FIX="/lib/systemd/system-sleep/usb_wakeup_fix_s3.sh"
+NVME_ASPM_SERVICE="/etc/systemd/system/nvme-aspm-fix.service"
 INITRD="/boot/initrd.img-$(uname -r)"
 LOGGER_TAG="s3-patch"
 
 # ---------- Logging (format-safe) ----------
-RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; NC=$'\e[0m'
+RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; YELLOW=$'\e[1;33m'; NC=$'\e[0m'
 log_err ()   { printf '%b\n' "${RED}$*${NC}" ; logger -t "$LOGGER_TAG" -- "ERROR: $*"; }
 log_info ()  { printf '%b\n' "${GREEN}$*${NC}"; logger -t "$LOGGER_TAG" -- "INFO:  $*"; }
+log_warn ()  { printf '%b\n' "${YELLOW}$*${NC}"; logger -t "$LOGGER_TAG" -- "WARN:  $*"; }
 
 # ---------- Root check ----------
 if [[ ${EUID} -ne 0 ]]; then
@@ -61,42 +63,69 @@ apt_install_retry () {
   fi
 }
 
-# ---------- Ensure tools ----------
-if ! command -v iasl >/dev/null 2>&1 || ! command -v binwalk >/dev/null 2>&1; then
-  apt_install_retry "${REQUIRED_PKGS[@]}"
-fi
-command -v iasl >/dev/null 2>&1 || { log_err "iasl not available."; exit 1; }
-command -v binwalk >/dev/null 2>&1 || { log_err "binwalk not available."; exit 1; }
-
-# ---------- Early exit if deep already active ----------
+# ---------- Check current sleep state ----------
+DEEP_ALREADY_ACTIVE=false
 if [[ -r /sys/power/mem_sleep ]]; then
   MEMSLEEP_CONTENT=$(< /sys/power/mem_sleep)
   log_info "mem_sleep: ${MEMSLEEP_CONTENT}"
   if grep -q '\[deep\]' <<<"$MEMSLEEP_CONTENT"; then
-    log_info "Deep sleep already active; nothing to do."
-    exit 0
+    DEEP_ALREADY_ACTIVE=true
+    log_info "Deep sleep already active."
   fi
 else
-  log_err "/sys/power/mem_sleep not present."
+  log_warn "/sys/power/mem_sleep not present."
 fi
 
-# ---------- Prepare workdir ----------
-WORKDIR="$(mktemp -d -t s3fix.XXXXXX)"
-cd "$WORKDIR"
-
-# ---------- Extract and patch DSDT ----------
-# Capture current raw DSDT
-if [[ ! -r /sys/firmware/acpi/tables/DSDT ]]; then
-  log_err "Cannot read /sys/firmware/acpi/tables/DSDT"
-  exit 1
+# ---------- Check USB wake workaround ----------
+if [[ -f "$SYSTEMD_SLEEP_FIX" ]]; then
+  log_info "USB wake workaround already installed."
+  INSTALL_USB_FIX=false
+else
+  log_info "USB wake workaround not found, will install."
+  INSTALL_USB_FIX=true
+  log_info "USB wake workaround not found, but disabled gives system crashes sometimes."
+  INSTALL_USB_FIX=false  
 fi
-cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
 
-# Decompile
-iasl -d dsdt.aml
+# ---------- Check NVMe ASPM service ----------
+if [[ -f "$NVME_ASPM_SERVICE" ]] && systemctl is-enabled nvme-aspm-fix.service &>/dev/null; then
+  log_info "NVMe ASPM fix service already installed and enabled."
+  INSTALL_NVME_FIX=false
+else
+  log_info "NVMe ASPM fix service not found or not enabled, will install."
+  INSTALL_NVME_FIX=true
+  log_info "NVMe ASPM fix service not found or not enabled, but disabled gives system crashes sometimes."
+  INSTALL_NVME_FIX=false  
+fi
 
-# Patch payload
-PATCH=$(cat <<'EOF'
+# ---------- Skip DSDT patching if deep already active ----------
+if [[ "$DEEP_ALREADY_ACTIVE" == "true" ]]; then
+  log_info "Skipping DSDT patching (deep sleep already active)."
+else
+  # ---------- Ensure tools ----------
+  if ! command -v iasl >/dev/null 2>&1 || ! command -v binwalk >/dev/null 2>&1; then
+    apt_install_retry "${REQUIRED_PKGS[@]}"
+  fi
+  command -v iasl >/dev/null 2>&1 || { log_err "iasl not available."; exit 1; }
+  command -v binwalk >/dev/null 2>&1 || { log_err "binwalk not available."; exit 1; }
+
+  # ---------- Prepare workdir ----------
+  WORKDIR="$(mktemp -d -t s3fix.XXXXXX)"
+  cd "$WORKDIR"
+
+  # ---------- Extract and patch DSDT ----------
+  # Capture current raw DSDT
+  if [[ ! -r /sys/firmware/acpi/tables/DSDT ]]; then
+    log_err "Cannot read /sys/firmware/acpi/tables/DSDT"
+    exit 1
+  fi
+  cat /sys/firmware/acpi/tables/DSDT > dsdt.aml
+
+  # Decompile
+  iasl -d dsdt.aml
+
+  # Patch payload
+  PATCH=$(cat <<'EOF'
 --- orig_dsdt.dsl	2025-01-31 01:04:57.678241801 +0100
 +++ dsdt.dsl	2025-01-31 01:06:00.852378024 +0100
 @@ -18,7 +18,7 @@
@@ -125,110 +154,112 @@ PATCH=$(cat <<'EOF'
 EOF
 )
 
-# Create a baseline copy for patch -- the patch expects orig_dsdt.dsl -> dsdt.dsl
-cp dsdt.dsl orig_dsdt.dsl
+  # Create a baseline copy for patch -- the patch expects orig_dsdt.dsl -> dsdt.dsl
+  cp dsdt.dsl orig_dsdt.dsl
 
-# Apply patch (tolerant to whitespace & already-applied)
-set +e
-echo "$PATCH" | patch --ignore-whitespace -N -p0
-case $? in
-  0) log_info "Patch applied." ;;
-  1) log_info "Patch was already applied; continuing." ;;
-  *) log_err "Patch failed."; exit 1 ;;
-esac
-set -e
+  # Apply patch (tolerant to whitespace & already-applied)
+  set +e
+  echo "$PATCH" | patch --ignore-whitespace -N -p0
+  case $? in
+    0) log_info "Patch applied." ;;
+    1) log_info "Patch was already applied; continuing." ;;
+    *) log_err "Patch failed."; exit 1 ;;
+  esac
+  set -e
 
-# Recompile; -ve = less verbose, still bail on errors
-iasl -ve dsdt.dsl
+  # Recompile; -ve = less verbose, still bail on errors
+  iasl -ve dsdt.dsl
 
-# ---------- Build tiny cpio with patched DSDT ----------
-mkdir -p kernel/firmware/acpi
-cp dsdt.aml kernel/firmware/acpi/
-find kernel | cpio -H newc --create > dsdt_patch
+  # ---------- Build tiny cpio with patched DSDT ----------
+  mkdir -p kernel/firmware/acpi
+  cp dsdt.aml kernel/firmware/acpi/
+  find kernel | cpio -H newc --create > dsdt_patch
 
-# ---------- Patch initrd if not already ----------
-if [[ ! -r "$INITRD" ]]; then
-  log_err "initrd not found: $INITRD"
-  exit 1
-fi
-
-log_info "Checking if initrd already contains patched DSDT (binwalk)…"
-if binwalk "$INITRD" 2>/dev/null | grep -q "kernel/firmware/acpi/dsdt.aml"; then
-    log_info "initrd already contains a dsdt.aml; skipping concat."
-else
-    log_info "Patching initrd…"
-    [[ -f "$INITRD.bck.s3patch" ]] || cp "$INITRD" "$INITRD.bck.s3patch"
-    cat dsdt_patch "$INITRD.bck.s3patch" > "$(basename "$INITRD")"
-    install -m 0644 "$(basename "$INITRD")" "$INITRD"
-    log_info "initrd patched."
-fi
-
-
-# ---------- GRUB editing (idempotent & robust) ----------
-backup_file () {
-  local f="$1"
-  [[ -f "${f}.bak.s3patch" ]] || cp -a "$f" "${f}.bak.s3patch"
-}
-
-ensure_kernel_flag () {
-  local flag="$1"
-  local line cur
-  backup_file "$GRUB_FILE"
-
-  # Read existing value (tolerate spaces/quotes)
-  if ! grep -qE "^\s*${GRUB_KEY}=" "$GRUB_FILE"; then
-    # Create key if missing
-    printf '%s\n' "${GRUB_KEY}=\"\"" >> "$GRUB_FILE"
+  # ---------- Patch initrd if not already ----------
+  if [[ ! -r "$INITRD" ]]; then
+    log_err "initrd not found: $INITRD"
+    exit 1
   fi
 
-  # Extract current value between first pair of quotes on the key line
- cur="$(awk -v key="$GRUB_KEY" '
- $0 ~ "^[[:space:]]*"key"=" {
-     val=$0
-     sub(/^[^"]*"/,"",val)   # drop everything before first "
-     sub(/".*$/,"",val)      # drop everything after closing "
-     print val
- }' "$GRUB_FILE")"
-
-  # If flag absent, append
-  if ! grep -qw -- "$flag" <<<"$cur"; then
-    line="$GRUB_KEY=\"${cur:+$cur }$flag\""
-    # Replace entire line atomically
-    awk -v key="$GRUB_KEY" -v newline="$line" '
-      BEGIN{replaced=0}
-      $0 ~ "^[[:space:]]*"key"=" && !replaced { print newline; replaced=1; next }
-      { print }
-      END{ if (!replaced) print newline }
-    ' "$GRUB_FILE" > "${GRUB_FILE}.tmp"
-    mv "${GRUB_FILE}.tmp" "$GRUB_FILE"
-    log_info "Added kernel flag: $flag"
+  log_info "Checking if initrd already contains patched DSDT (binwalk)…"
+  if binwalk "$INITRD" 2>/dev/null | grep -q "kernel/firmware/acpi/dsdt.aml"; then
+      log_info "initrd already contains a dsdt.aml; skipping concat."
   else
-    log_info "Kernel flag already present: $flag"
+      log_info "Patching initrd…"
+      [[ -f "$INITRD.bck.s3patch" ]] || cp "$INITRD" "$INITRD.bck.s3patch"
+      cat dsdt_patch "$INITRD.bck.s3patch" > "$(basename "$INITRD")"
+      install -m 0644 "$(basename "$INITRD")" "$INITRD"
+      log_info "initrd patched."
   fi
-}
 
-for f in "${REQUIRED_KERNEL_FLAGS[@]}"; do
-  ensure_kernel_flag "$f"
-done
+  # ---------- GRUB editing (idempotent & robust) ----------
+  backup_file () {
+    local f="$1"
+    [[ -f "${f}.bak.s3patch" ]] || cp -a "$f" "${f}.bak.s3patch"
+  }
 
-# Generate grub config (distro-agnostic helper if present)
-if command -v update-grub >/dev/null 2>&1; then
-  update-grub
-elif command -v grub-mkconfig >/dev/null 2>&1; then
-  # Common locations for grub.cfg
-  if [[ -d /boot/grub ]]; then
-    grub-mkconfig -o /boot/grub/grub.cfg
-  elif [[ -d /boot/grub2 ]]; then
-    grub-mkconfig -o /boot/grub2/grub.cfg
+  ensure_kernel_flag () {
+    local flag="$1"
+    local line cur
+    backup_file "$GRUB_FILE"
+
+    # Read existing value (tolerate spaces/quotes)
+    if ! grep -qE "^\s*${GRUB_KEY}=" "$GRUB_FILE"; then
+      # Create key if missing
+      printf '%s\n' "${GRUB_KEY}=\"\"" >> "$GRUB_FILE"
+    fi
+
+    # Extract current value between first pair of quotes on the key line
+   cur="$(awk -v key="$GRUB_KEY" '
+   $0 ~ "^[[:space:]]*"key"=" {
+       val=$0
+       sub(/^[^"]*"/,"",val)   # drop everything before first "
+       sub(/".*$/,"",val)      # drop everything after closing "
+       print val
+   }' "$GRUB_FILE")"
+
+    # If flag absent, append
+    if ! grep -qw -- "$flag" <<<"$cur"; then
+      line="$GRUB_KEY=\"${cur:+$cur }$flag\""
+      # Replace entire line atomically
+      awk -v key="$GRUB_KEY" -v newline="$line" '
+        BEGIN{replaced=0}
+        $0 ~ "^[[:space:]]*"key"=" && !replaced { print newline; replaced=1; next }
+        { print }
+        END{ if (!replaced) print newline }
+      ' "$GRUB_FILE" > "${GRUB_FILE}.tmp"
+      mv "${GRUB_FILE}.tmp" "$GRUB_FILE"
+      log_info "Added kernel flag: $flag"
+    else
+      log_info "Kernel flag already present: $flag"
+    fi
+  }
+
+  for f in "${REQUIRED_KERNEL_FLAGS[@]}"; do
+    ensure_kernel_flag "$f"
+  done
+
+  # Generate grub config (distro-agnostic helper if present)
+  if command -v update-grub >/dev/null 2>&1; then
+    update-grub
+  elif command -v grub-mkconfig >/dev/null 2>&1; then
+    # Common locations for grub.cfg
+    if [[ -d /boot/grub ]]; then
+      grub-mkconfig -o /boot/grub/grub.cfg
+    elif [[ -d /boot/grub2 ]]; then
+      grub-mkconfig -o /boot/grub2/grub.cfg
+    else
+      log_err "Cannot locate grub.cfg directory; run grub-mkconfig manually."
+    fi
   else
-    log_err "Cannot locate grub.cfg directory; run grub-mkconfig manually."
+    log_err "Neither update-grub nor grub-mkconfig found."
   fi
-else
-  log_err "Neither update-grub nor grub-mkconfig found."
 fi
 
 # ---------- USB wake workaround ----------
-install -Dm0755 /dev/stdin "$SYSTEMD_SLEEP_FIX" <<'EOS'
+if [[ "$INSTALL_USB_FIX" == "true" ]]; then
+  log_info "Installing USB wake workaround…"
+  install -Dm0755 /dev/stdin "$SYSTEMD_SLEEP_FIX" <<'EOS'
 #!/usr/bin/env bash
 # /lib/systemd/system-sleep/usb_wakeup_fix_s3.sh
 # Unbind/rebind xhci controllers around suspend to avoid dead USB after resume
@@ -249,6 +280,29 @@ elif [[ "${1:-}" == "post" ]]; then
   done < "$tmp"
 fi
 EOS
+  log_info "USB wake workaround installed."
+fi
+
+# ---------- NVMe ASPM fix (HP BIOS ignores kernel params) ----------
+if [[ "$INSTALL_NVME_FIX" == "true" ]]; then
+  log_info "Installing NVMe ASPM fix systemd service…"
+  install -Dm0644 /dev/stdin "$NVME_ASPM_SERVICE" <<'EOS'
+[Unit]
+Description=Disable ASPM for NVMe (HP BIOS workaround)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/setpci -s 03:00.0 CAP_EXP+0x10.L=0x00000000
+
+[Install]
+WantedBy=multi-user.target
+EOS
+
+  systemctl daemon-reload
+  systemctl enable nvme-aspm-fix.service
+  log_info "NVMe ASPM fix service enabled."
+fi
 
 # ---------- Self-install to postinst hook ----------
 # Determine script source path (works for both one-shot run and postinst invocations)
@@ -265,6 +319,7 @@ log_info "All done."
 log_info "To remove:"
 log_info "  rm -f \"$POSTINST_TARGET\""
 log_info "  rm -f \"$SYSTEMD_SLEEP_FIX\""
+log_info "  systemctl disable nvme-aspm-fix.service && rm -f \"$NVME_ASPM_SERVICE\""
 log_info "  [[ -f \"$INITRD.bck.s3patch\" ]] && cp -a \"$INITRD.bck.s3patch\" \"$INITRD\""
 log_info "  apt-get remove -y acpica-tools binwalk   # on Debian/Ubuntu"
 log_info "  Manually remove flags from $GRUB_FILE: ${REQUIRED_KERNEL_FLAGS[*]}"
