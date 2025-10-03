@@ -8,7 +8,7 @@ IFS=$'\n\t'
 REQUIRED_PKGS=(acpica-tools binwalk)
 GRUB_FILE="/etc/default/grub"
 GRUB_KEY="GRUB_CMDLINE_LINUX_DEFAULT"
-REQUIRED_KERNEL_FLAGS=("mem_sleep_default=deep" "pcie_aspm.policy=performance" "nvme_core.default_ps_max_latency_us=0")
+REQUIRED_KERNEL_FLAGS=("mem_sleep_default=deep" "pcie_aspm=performance" "nvme_core.default_ps_max_latency_us=0")
 POSTINST_TARGET="/etc/kernel/postinst.d/yy-s3-sleep-fix"
 SYSTEMD_SLEEP_FIX="/lib/systemd/system-sleep/usb_wakeup_fix_s3.sh"
 INITRD="/boot/initrd.img-$(uname -r)"
